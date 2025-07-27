@@ -1,0 +1,51 @@
+{
+  "name": "llm-studio-unified-ai-assistant-tool",
+  "displayName": "LLM Studio - Unified AI Assistant Tool",
+  "description": "A unified AI assistant extension for VS Code which supports multiple LLMs and Choosed Which LLM's response is better.",
+  "version": "0.0.1",
+  "publisher": "your-name",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:llmStudioSidebarView"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "llmStudio",
+          "title": "LLM Studio",
+          "icon": "media/bot.png"
+        }
+      ]
+    },
+    "views": {
+      "llmStudio": [
+        {
+          "id": "llmStudioSidebarView",
+          "name": "LLM Studio",
+          "type": "webview"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "watch": "esbuild src/extension.ts --bundle --platform=node --external:vscode --outfile=dist/extension.js --watch",
+    "build": "npm run compile && cd webview && npm run build",
+    "compile": "esbuild src/extension.ts --bundle --platform=node --external:vscode --outfile=dist/extension.js"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.90.0",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.4.5"
+  },
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  }
+}
