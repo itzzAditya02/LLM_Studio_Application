@@ -28,6 +28,9 @@ export default function App() {
   const [results, setResults] = useState<ModelResult[]>([]);
   const [judgeResult, setJudgeResult] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
+  const [attachedFileName, setAttachedFileName] = useState<string | null>(null);
+  const [attachedFileContent, setAttachedFileContent] = useState<string | null>(null);
+  const [showSuggestions, setShowSuggestions] = useState<boolean>(false);
 
   useEffect(() => {
     function handleMessage(event: MessageEvent) {
@@ -56,64 +59,32 @@ export default function App() {
   }, []);
 
   const runSingleModel = () => {
-    if (!vscode) {
-      alert("This app must run inside VS Code!");
-      return;
-    }
-    if (!singleModel) {
-      alert("Select exactly one model for single query.");
-      return;
-    }
-    if (!prompt.trim()) {
-      alert("Please enter a prompt.");
-      return;
-    }
+    if (!vscode || !singleModel || !prompt.trim()) return;
     setLoading(true);
     setJudgeResult(null);
     setResults([]);
-
     vscode.postMessage({
       command: "singleModelQuery",
-      prompt,
+      prompt: prompt + (attachedFileContent ? `\n\nAttached File:\n${attachedFileContent}` : ""),
       model: singleModel,
     });
   };
 
   const runCompareModels = () => {
-    if (!vscode) {
-      alert("This app must run inside VS Code!");
-      return;
-    }
-    if (compareModels.length !== 2) {
-      alert("Select exactly two models to compare.");
-      return;
-    }
-    if (!prompt.trim()) {
-      alert("Please enter a prompt.");
-      return;
-    }
+    if (!vscode || compareModels.length !== 2 || !prompt.trim()) return;
     setLoading(true);
     setJudgeResult(null);
     setResults([]);
-
     vscode.postMessage({
       command: "compareModels",
-      prompt,
+      prompt: prompt + (attachedFileContent ? `\n\nAttached File:\n${attachedFileContent}` : ""),
       models: compareModels,
     });
   };
 
   const runJudge = () => {
-    if (!vscode) {
-      alert("This app must run inside VS Code!");
-      return;
-    }
-    if (results.length < 2) {
-      alert("Need at least two results to judge.");
-      return;
-    }
+    if (!vscode || results.length < 2) return;
     setLoading(true);
-
     vscode.postMessage({
       command: "judge",
       prompt,
@@ -130,17 +101,60 @@ export default function App() {
     setCompareModels([]);
     setResults([]);
     setJudgeResult(null);
+    setAttachedFileName(null);
+    setAttachedFileContent(null);
   };
 
   const downloadResponse = (model: string, response: string) => {
-    const element = document.createElement("a");
-    const file = new Blob([response], { type: "text/plain" });
-    element.href = URL.createObjectURL(file);
-    element.download = `${model}_response.txt`;
-    document.body.appendChild(element);
-    element.click();
-    document.body.removeChild(element);
+  if (!vscode) return;
+  vscode.postMessage({
+    command: "downloadResponse",
+    fileName: `${model}_response.txt`,
+    content: response,
+  });
+};
+
+  const renderDiff = () => {
+    if (results.length !== 2) return null;
+    const [a, b] = results.map((r) => r.response.split("\n"));
+    const maxLen = Math.max(a.length, b.length);
+    return (
+      <div style={{ marginBottom: 30 }}>
+        <h3 style={{ marginBottom: 10 }}>🔍 Diff View</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          {Array.from({ length: maxLen }).map((_, i) => (
+            <React.Fragment key={i}>
+              <div
+                style={{
+                  backgroundColor: a[i] !== b[i] ? "#ffefef" : "#f5f5f5",
+                  padding: 6,
+                  fontFamily: "monospace",
+                }}
+              >
+                {a[i] || ""}
+              </div>
+              <div
+                style={{
+                  backgroundColor: a[i] !== b[i] ? "#efffff" : "#f5f5f5",
+                  padding: 6,
+                  fontFamily: "monospace",
+                }}
+              >
+                {b[i] || ""}
+              </div>
+            </React.Fragment>
+          ))}
+        </div>
+      </div>
+    );
   };
+
+  const suggestions = [
+    "Explain this code snippet:",
+    "Optimize this function:",
+    "Fix the bug in this logic:",
+    "Convert this to Python/JS/C++:",
+  ];
 
   return (
     <div style={{ maxWidth: 900, margin: "2rem auto", padding: "0 1rem" }}>
@@ -150,7 +164,10 @@ export default function App() {
 
       <textarea
         value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
+        onChange={(e) => {
+          setPrompt(e.target.value);
+          setShowSuggestions(e.target.value.length < 4);
+        }}
         placeholder="Enter your prompt here..."
         rows={5}
         style={{
@@ -159,7 +176,7 @@ export default function App() {
           padding: 12,
           borderRadius: 6,
           border: "1px solid #ddd",
-          marginBottom: 20,
+          marginBottom: 10,
           resize: "vertical",
           boxSizing: "border-box",
           color: "white",
@@ -168,6 +185,50 @@ export default function App() {
         }}
         disabled={loading}
       />
+
+      {showSuggestions && (
+        <div style={{ marginBottom: 15 }}>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>💡 Suggestions:</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {suggestions.map((sugg) => (
+              <button
+                key={sugg}
+                onClick={() => setPrompt(sugg)}
+                style={{
+                  padding: "4px 10px",
+                  background: "#f0f0f0",
+                  border: "1px solid #ccc",
+                  borderRadius: 4,
+                  cursor: "pointer",
+                  fontSize: 13,
+                }}
+              >
+                {sugg}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div style={{ marginBottom: 20 }}>
+        <label style={{ fontWeight: 600 }}>📎 Attach File (optional):</label>
+        <input
+          type="file"
+          accept=".txt,.js,.ts,.py,.cpp,.c,.json"
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            if (file) {
+              const text = await file.text();
+              setAttachedFileName(file.name);
+              setAttachedFileContent(text);
+            }
+          }}
+          disabled={loading}
+        />
+        {attachedFileName && (
+          <div style={{ fontSize: 12, marginTop: 4 }}>Attached: {attachedFileName}</div>
+        )}
+      </div>
 
       <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: 20 }}>
         <div>
@@ -199,14 +260,7 @@ export default function App() {
         <div>
           <label style={{ fontWeight: 600 }}>Compare Models (select 2):</label>
           <br />
-          <div
-            style={{
-              display: "flex",
-              gap: 10,
-              flexWrap: "wrap",
-              marginTop: 6,
-            }}
-          >
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 6 }}>
             {MODEL_OPTIONS.map(({ value, label }) => {
               const disabledOption = compareModels.length >= 2 && !compareModels.includes(value);
               return (
@@ -273,26 +327,21 @@ export default function App() {
       </div>
 
       {results.length > 0 && (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: results.length === 1 ? "1fr" : "1fr 1fr",
-            gap: 20,
-            marginBottom: 30
-          }}
-        >
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: results.length === 1 ? "1fr" : "1fr 1fr",
+          gap: 20,
+          marginBottom: 30
+        }}>
           {results.map(({ model, response, tokensUsed }) => (
-            <div
-              key={model}
-              style={{
-                border: "1px solid #ddd",
-                borderRadius: 6,
-                padding: 16,
-                backgroundColor: "#FAFAFA",
-                display: "flex",
-                flexDirection: "column"
-              }}
-            >
+            <div key={model} style={{
+              border: "1px solid #ddd",
+              borderRadius: 6,
+              padding: 16,
+              backgroundColor: "#FAFAFA",
+              display: "flex",
+              flexDirection: "column"
+            }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                 <strong>{model}</strong>
                 <button
@@ -313,35 +362,31 @@ export default function App() {
               <div style={{ fontSize: 12, color: "#666", marginBottom: 12 }}>
                 Tokens used: {tokensUsed}
               </div>
-              <pre
-                style={{
-                  overflowY: "auto",
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-word",
-                  fontFamily: "'Consolas', 'Courier New', monospace",
-                  fontSize: 14,
-                  color: "#111"
-                }}
-              >
-                {response}
-              </pre>
+              <pre style={{
+                overflowY: "auto",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                fontFamily: "'Consolas', 'Courier New', monospace",
+                fontSize: 14,
+                color: "#111"
+              }}>{response}</pre>
             </div>
           ))}
         </div>
       )}
 
+      {renderDiff()}
+
       {judgeResult && (
-        <div
-          style={{
-            borderLeft: "6px solid #1A73E8",
-            backgroundColor: "#E3F2FD",
-            padding: 20,
-            borderRadius: 6,
-            fontSize: 14,
-            color: "#0D47A1",
-            whiteSpace: "pre-wrap"
-          }}
-        >
+        <div style={{
+          borderLeft: "6px solid #1A73E8",
+          backgroundColor: "#E3F2FD",
+          padding: 20,
+          borderRadius: 6,
+          fontSize: 14,
+          color: "#0D47A1",
+          whiteSpace: "pre-wrap"
+        }}>
           <strong style={{ display: "block", marginBottom: 10 }}>Judge Evaluation:</strong>
           {judgeResult}
         </div>

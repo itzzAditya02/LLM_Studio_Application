@@ -35,6 +35,7 @@ __export(extension_exports, {
 });
 module.exports = __toCommonJS(extension_exports);
 var vscode = __toESM(require("vscode"));
+var path = __toESM(require("path"));
 var fs = __toESM(require("fs"));
 function activate(context) {
   const provider = new LLMStudioViewProvider(context);
@@ -56,32 +57,81 @@ var LLMStudioViewProvider = class {
     const indexPath = vscode.Uri.joinPath(distPath, "index.html");
     let html = fs.readFileSync(indexPath.fsPath, "utf8");
     html = html.replace(/(src|href)="([^"]+)"/g, (match, attr, url) => {
-      if (url.startsWith("http") || url.startsWith("data:")) {
+      if (url.startsWith("http") || url.startsWith("data:"))
         return match;
-      }
       const resourceUri = webview.asWebviewUri(vscode.Uri.joinPath(distPath, url));
       return `${attr}="${resourceUri.toString()}"`;
     });
     webview.html = html;
+    const sendOpenFile = () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor)
+        return;
+      const fileName = path.basename(editor.document.uri.fsPath);
+      const fileContent = editor.document.getText();
+      webview.postMessage({
+        command: "openFileInfo",
+        fileName,
+        fileContent
+      });
+    };
+    sendOpenFile();
+    vscode.window.onDidChangeActiveTextEditor(() => {
+      sendOpenFile();
+    });
     webview.onDidReceiveMessage(async (message) => {
       try {
-        if (message.command === "compareModels") {
-          const prompt = message.prompt;
-          const models = message.models;
-          const results = await fetchCompareModels(prompt, models);
-          webview.postMessage({ command: "compareModelsResponse", responses: results });
-        } else if (message.command === "singleModelQuery") {
-          const prompt = message.prompt;
-          const model = message.model;
-          const result = await fetchSingleModel(prompt, model);
-          webview.postMessage({ command: "singleModelResponse", ...result });
-        } else if (message.command === "judge") {
-          const judgeResult = await fetchJudgeResult(message);
-          webview.postMessage({ command: "judgeResponse", evaluation: judgeResult });
+        switch (message.command) {
+          case "compareModels": {
+            const { prompt, models } = message;
+            const results = await fetchCompareModels(prompt, models);
+            webview.postMessage({ command: "compareModelsResponse", responses: results });
+            break;
+          }
+          case "singleModelQuery": {
+            const { prompt, model } = message;
+            const result = await fetchSingleModel(prompt, model);
+            webview.postMessage({ command: "singleModelResponse", ...result });
+            break;
+          }
+          case "judge": {
+            const judgeResult = await fetchJudgeResult(message);
+            webview.postMessage({ command: "judgeResponse", evaluation: judgeResult });
+            break;
+          }
+          case "uploadAttachedFile": {
+            const { fileName, content } = message;
+            console.log(`Received file: ${fileName}`);
+            break;
+          }
+          case "downloadResponse": {
+            const { model, content } = message;
+            const defaultUri = vscode.Uri.file(
+              path.join(require("os").homedir(), `${model.replace(/\s+/g, "_")}_response.txt`)
+            );
+            const uri = await vscode.window.showSaveDialog({
+              defaultUri,
+              filters: { Text: ["txt"] },
+              saveLabel: "Save LLM Response"
+            });
+            if (uri) {
+              fs.writeFileSync(uri.fsPath, content, "utf8");
+              vscode.window.showInformationMessage(`Response saved to: ${uri.fsPath}`);
+              webview.postMessage({
+                command: "downloadComplete",
+                path: uri.fsPath
+              });
+            } else {
+              vscode.window.showWarningMessage("Save cancelled.");
+            }
+            break;
+          }
+          default:
+            vscode.window.showWarningMessage(`Unknown command received: ${message.command}`);
         }
       } catch (e) {
         const errorMsg = e instanceof Error ? e.message : String(e);
-        vscode.window.showErrorMessage(`Error fetching LLM responses: ${errorMsg}`);
+        vscode.window.showErrorMessage(`Error: ${errorMsg}`);
         webview.postMessage({ command: "error", error: errorMsg });
       }
     });
@@ -93,9 +143,8 @@ async function fetchCompareModels(prompt, models) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ prompt, models })
   });
-  if (!resp.ok) {
+  if (!resp.ok)
     throw new Error(`API responded with status ${resp.status}`);
-  }
   const data = await resp.json();
   return data.results;
 }
@@ -105,9 +154,8 @@ async function fetchSingleModel(prompt, model) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ prompt, model })
   });
-  if (!resp.ok) {
+  if (!resp.ok)
     throw new Error(`API responded with status ${resp.status}`);
-  }
   const data = await resp.json();
   return data;
 }
@@ -123,13 +171,11 @@ async function fetchJudgeResult(message) {
       response_b: message.response_b
     })
   });
-  if (!resp.ok) {
+  if (!resp.ok)
     throw new Error(`API responded with status ${resp.status}`);
-  }
   const data = await resp.json();
-  if (data.error) {
+  if (data.error)
     throw new Error(data.error);
-  }
   return data.evaluation;
 }
 function deactivate() {
